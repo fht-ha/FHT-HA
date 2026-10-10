@@ -4754,6 +4754,46 @@ class ServerTests(unittest.TestCase):
             [("light", "turn_on", {"entity_id": ["light.fht_kitchen_bar_lights", "light.kitchen_fan_light"]})],
         )
 
+    def test_all_on_uses_current_mode_brightness_from_presence(self) -> None:
+        """Night mode: the Kitchen sensor's 80% (and 3000K) for lights in its group; the lamp no sensor covers gets none."""
+        entities = {
+            "input_select.fht_house_mode": {"entity_id": "input_select.fht_house_mode", "state": "Night"},
+            "input_select.fht_bedroom_1_mode": {"entity_id": "input_select.fht_bedroom_1_mode", "state": "Sleep"},
+            "binary_sensor.kitchen_presence": {"entity_id": "binary_sensor.kitchen_presence", "area": "Kitchen"},
+            "binary_sensor.bedroom_1_presence": {"entity_id": "binary_sensor.bedroom_1_presence", "area": "Bedroom 1"},
+            "light.fht_kitchen_all_lights": {"entity_id": "light.fht_kitchen_all_lights",
+                                             "members": ["light.kitchen_bar_1", "light.kitchen_bar_2", "light.kitchen_can_1"]},
+            "light.fht_kitchen_bar_lights": {"entity_id": "light.fht_kitchen_bar_lights",
+                                             "members": ["light.kitchen_bar_1", "light.kitchen_bar_2"]},
+        }
+        assignments = {
+            "binary_sensor.kitchen_presence": ["light.fht_kitchen_all_lights"],
+            "binary_sensor.bedroom_1_presence": "light.bedroom_1_fan_light",
+        }
+        mode_settings = {
+            "binary_sensor.kitchen_presence": {"night": {"enabled": True, "brightness": 80, "color_mode": "kelvin", "color_kelvin": 3000}},
+            "binary_sensor.bedroom_1_presence": {"night": {"brightness": 60}, "sleep": {"brightness": 10}},
+        }
+        data = SERVER.mode_turn_on_data(
+            ["light.fht_kitchen_bar_lights", "light.kitchen_can_1", "light.kitchen_lamp", "light.bedroom_1_fan_light"],
+            assignments, mode_settings, {"Bedroom 1": ["sleep"]}, entities,
+        )
+        self.assertEqual(data, {
+            "light.fht_kitchen_bar_lights": {"brightness_pct": 80, "color_temp_kelvin": 3000},
+            "light.kitchen_can_1": {"brightness_pct": 80, "color_temp_kelvin": 3000},
+            # Bedroom 1 has Sleep turned on as a room mode, so its own mode wins.
+            "light.bedroom_1_fan_light": {"brightness_pct": 10},
+        })
+
+        publisher = SERVER.HomeAssistantHelperPublisher("token", "http://example/services")
+        calls = []
+        with patch.object(publisher, "_call_service", side_effect=lambda *args: calls.append(args)):
+            publisher.light_action("turn_on", ["light.fht_kitchen_bar_lights", "light.fht_kitchen_lamp"], None, data)
+        self.assertEqual(calls, [
+            ("light", "turn_on", {"entity_id": ["light.fht_kitchen_bar_lights"], "brightness_pct": 80, "color_temp_kelvin": 3000}),
+            ("light", "turn_on", {"entity_id": ["light.fht_kitchen_lamp"]}),
+        ])
+
     def test_old_room_lights_helper_folds_into_singular_room_light(self) -> None:
         """An old area-less Dining Room Lights helper joins the App's Dining Room Light."""
         entities = [

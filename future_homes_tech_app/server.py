@@ -7767,6 +7767,55 @@ def lighting_entity_ids(
     return {f"light.{unique_id}" for unique_id in unique_ids} | set(standalone)
 
 
+def mode_turn_on_data(
+    entity_ids: list[str],
+    assignments: dict[str, Any],
+    mode_settings: dict[str, Any],
+    room_modes: dict[str, list[str]],
+    entities_by_id: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, int]]:
+    """Return the turn_on data Lighting's All on uses for each light.
+
+    A light takes the brightness (and Kelvin tone) its presence sensor
+    applies in the current mode: the room's mode when the sensor has a
+    setting for it, otherwise the house's Day, Night or Sleep. When several
+    sensors cover a light the brightest wins; a light no sensor covers gets
+    no data, so Home Assistant brings it back at its last brightness.
+    """
+    def leaves(entity_id: str) -> set[str]:
+        members = (entities_by_id.get(entity_id) or {}).get("members") or []
+        return {str(member) for member in members} or {entity_id}
+
+    house_mode = str((entities_by_id.get(HOUSE_MODE_HELPER) or {}).get("state") or "").lower()
+    candidates: dict[str, list[tuple[int, int | None]]] = {}
+    for presence_id, target_ids in sorted(assignments.items()):
+        targets = [target_ids] if isinstance(target_ids, str) else list(target_ids or [])
+        covered = set().union(*(leaves(str(target)) for target in targets), set(map(str, targets)))
+        try:
+            setting = PresenceModeSettings.normalize(mode_settings.get(presence_id))
+        except ValueError:
+            continue
+        sensor = entities_by_id.get(presence_id) or {}
+        room = str(sensor.get("original_area") or sensor.get("area") or "")
+        overrides = [mode for mode in setting if mode in room_modes.get(room, [])]
+        room_mode = str(
+            (entities_by_id.get(f"input_select.fht_{BedroomModeAutomationManager._slug(room)}_mode") or {}).get("state") or ""
+        ).lower().replace(" ", "_") if room else ""
+        mode = room_mode if room_mode in overrides else house_mode
+        if mode not in setting:
+            continue
+        values = setting[mode]
+        kelvin = int(values["color_kelvin"]) if values.get("color_mode") == "kelvin" else None
+        for entity_id in entity_ids:
+            if entity_id in covered or leaves(entity_id) <= covered:
+                candidates.setdefault(entity_id, []).append((int(values["brightness"]), kelvin))
+    data: dict[str, dict[str, int]] = {}
+    for entity_id, options in candidates.items():
+        brightness, kelvin = max(options, key=lambda option: option[0])
+        data[entity_id] = {"brightness_pct": brightness, **({"color_temp_kelvin": kelvin} if kelvin else {})}
+    return data
+
+
 def replace_entity_ids_in_settings(settings_directory: Path, replacements: dict[str, list[str]]) -> int:
     """Swap retired entity IDs in saved App settings; return files changed.
 
@@ -9615,8 +9664,13 @@ class HomeAssistantHelperPublisher:
         action: str,
         entity_ids: list[str],
         brightness_pct: Any = None,
+        turn_on_data: dict[str, dict[str, int]] | None = None,
     ) -> None:
-        """Run one validated Future Homes Tech light-group action."""
+        """Run one validated Future Homes Tech light-group action.
+
+        turn_on can carry per-light data (the current mode's brightness);
+        lights with the same data share one call.
+        """
 
         standalone = lighting_entity_ids() or set()
         valid_entity_ids = sorted(
@@ -9631,6 +9685,13 @@ class HomeAssistantHelperPublisher:
         service_data: dict[str, Any] = {"entity_id": valid_entity_ids}
         if action == "toggle" and len(valid_entity_ids) == 1:
             self._call_service("light", "toggle", service_data)
+            return
+        if action == "turn_on" and turn_on_data:
+            batches: dict[str, list[str]] = {}
+            for entity_id in valid_entity_ids:
+                batches.setdefault(json.dumps(turn_on_data.get(entity_id) or {}, sort_keys=True), []).append(entity_id)
+            for data, batch in batches.items():
+                self._call_service("light", "turn_on", {"entity_id": batch, **json.loads(data)})
             return
         if action in {"turn_on", "turn_off"}:
             self._call_service("light", action, service_data)
@@ -14001,10 +14062,30 @@ class FutureHomesTechRequestHandler(BaseHTTPRequestHandler):
                     if isinstance(raw_entity_ids, list)
                     else [str(payload.get("entity_id") or "")]
                 )
+                action = str(payload.get("action") or "")
+                turn_on_data = None
+                if action == "turn_on":
+                    # All on uses the brightness of the current Day, Night
+                    # or Sleep mode from Presence.
+                    entities_by_id = {
+                        str(entity.get("entity_id") or ""): entity
+                        for entity in self.inventory.fetch(
+                            include_all=True,
+                            predicate=lambda entity: entity.get("domain") in {"light", "binary_sensor", "input_select"},
+                        )["entities"]
+                    }
+                    turn_on_data = mode_turn_on_data(
+                        entity_ids,
+                        self.presence_assignments.read(),
+                        self.presence_mode_settings.read(),
+                        self.room_modes.read(),
+                        entities_by_id,
+                    )
                 self.configuration_publisher.light_action(
-                    str(payload.get("action") or ""),
+                    action,
                     entity_ids,
                     payload.get("brightness_pct"),
+                    turn_on_data,
                 )
             except (ValueError, TypeError, json.JSONDecodeError) as err:
                 self._send_json(

@@ -2775,3 +2775,4 @@ Homeowner-approved Stable release bringing together Beta 0.6.7–0.6.32:
 ## 0.8.42 (Beta)
 
 - Lighting: a room shows only the All on or All off button it can use. When every light in the room is off you see just All on, when they're all on just All off, and a room whose lights are all offline shows neither. Before, the button with nothing to do was greyed out.
+- Lighting: All on turns each light on at the brightness its presence sensor uses in the current mode (Day, Night or Sleep, or the room's own mode such as Sleep when it's turned on for that room), including the Kelvin tone when one is set. A light no presence sensor covers comes back at its last brightness.
