@@ -10150,6 +10150,99 @@ def sync_generated_configuration_on_startup(
             time.sleep(retry_delay)
 
 
+# Weather conditions the sidebar shows its rain card for.
+RAIN_CONDITIONS = frozenset({"rainy", "pouring", "lightning-rainy"})
+# Air-quality integrations that report the outdoor AQI, preferred over an
+# indoor monitor that also reports one.
+OUTDOOR_AQI_INTEGRATIONS = frozenset({
+    "airnow", "waqi", "airvisual", "google_air_quality", "openweathermap",
+    "iqvia", "purpleair", "ambee",
+})
+HEAT_ALERT_PATTERN = re.compile(
+    r"\b(?:heat advisory|excessive heat|extreme heat|heat warning|heat watch)\b",
+    re.IGNORECASE,
+)
+WEATHER_FORECAST_CACHE_SECONDS = 15 * 60
+_weather_forecast_cache: dict[str, tuple[float, str | None]] = {}
+_weather_forecast_lock = threading.Lock()
+
+
+def _entity_name_text(entity: dict[str, Any]) -> str:
+    return " ".join(
+        str(entity.get(key) or "") for key in ("friendly_name", "entity_id")
+    ).replace("_", " ")
+
+
+def outdoor_aqi_entity(entities: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return the AQI sensor that best reads the outdoor air, if any."""
+    candidates = []
+    for entity in entities:
+        if str(entity.get("domain") or "") != "sensor":
+            continue
+        if str(entity.get("device_class") or "").casefold() != "aqi":
+            continue
+        try:
+            float(str(entity.get("state")))
+        except ValueError:
+            continue
+        rank = (
+            0 if str(entity.get("integration") or "") in OUTDOOR_AQI_INTEGRATIONS
+            else 1 if not entity.get("area") else 2
+        )
+        candidates.append((rank, str(entity.get("entity_id")), entity))
+    return min(candidates, key=lambda item: item[:2])[2] if candidates else None
+
+
+def heat_alert_entities(entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return entities that report heat advisories or weather alerts."""
+    found = []
+    for entity in entities:
+        domain = str(entity.get("domain") or "")
+        if domain not in {"binary_sensor", "sensor"}:
+            continue
+        words = _entity_name_text(entity).casefold()
+        if HEAT_ALERT_PATTERN.search(words) or re.search(
+            r"\b(?:weather alerts?|nws alerts?|weatheralerts|meteoalarm)\b", words
+        ):
+            found.append(entity)
+    return found
+
+
+def heat_advisory_from_states(states: list[dict[str, Any]]) -> str | None:
+    """Return the active heat alert's title from alert entity states."""
+    for state in states:
+        entity_id = str(state.get("entity_id") or "")
+        value = str(state.get("state") or "").casefold()
+        attributes = state.get("attributes") or {}
+        name = f"{entity_id.replace('_', ' ')} {attributes.get('friendly_name') or ''}"
+        if value in {"", "off", "unknown", "unavailable", "0", "none"}:
+            continue
+        own_name = HEAT_ALERT_PATTERN.search(name)
+        if own_name and (value in {"on", "true", "active"} or value.isdigit()):
+            return own_name.group(0).title()
+        details = HEAT_ALERT_PATTERN.search(
+            json.dumps(attributes, default=str) + " " + value
+        )
+        if details:
+            return details.group(0).title()
+    return None
+
+
+def forecast_condition_from_response(
+    response: Any, entity_id: str
+) -> str | None:
+    """Return the next forecast condition from a weather.get_forecasts reply."""
+    if isinstance(response, dict) and "response" in response:
+        response = response.get("response")
+    forecast = ((response or {}).get(entity_id) or {}).get("forecast")
+    if not isinstance(forecast, list):
+        return None
+    for item in forecast:
+        if isinstance(item, dict) and item.get("condition"):
+            return str(item["condition"])
+    return None
+
+
 ENTITY_CATALOG_FIELDS = (
     "entity_id", "friendly_name", "domain", "device_class", "area", "floor",
     "device_name", "device_id", "original_name", "integration", "members",
@@ -10254,7 +10347,11 @@ class EntityInventory:
             channels.add("security")
         if entity.get("integration") == PROTECT_INTEGRATION:
             channels.add("protect")
-        if entity_id == DEFAULT_WEATHER_ENTITY:
+        if (
+            entity_id == DEFAULT_WEATHER_ENTITY
+            or (domain == "sensor" and device_class == "aqi")
+            or heat_alert_entities([entity])
+        ):
             channels.add("weather")
         return sorted(channels)
 
@@ -11244,6 +11341,63 @@ class FutureHomesTechRequestHandler(BaseHTTPRequestHandler):
             )
             type(self)._ha_persons_cache = (time.monotonic(), persons)
             return persons
+
+    def _weather_forecast_condition(self) -> str | None:
+        """Return today's forecast condition, read at most every 15 minutes."""
+        now = time.monotonic()
+        with _weather_forecast_lock:
+            cached = _weather_forecast_cache.get(DEFAULT_WEATHER_ENTITY)
+            if cached and now - cached[0] < WEATHER_FORECAST_CACHE_SECONDS:
+                return cached[1]
+            condition = None
+            for forecast_type in ("daily", "twice_daily", "hourly"):
+                try:
+                    response = execute_websocket_commands(
+                        self.inventory._token,
+                        self.inventory._websocket_url,
+                        [{
+                            "type": "call_service",
+                            "domain": "weather",
+                            "service": "get_forecasts",
+                            "service_data": {"type": forecast_type},
+                            "target": {"entity_id": DEFAULT_WEATHER_ENTITY},
+                            "return_response": True,
+                        }],
+                    )[0]
+                except (HomeAssistantAPIError, OSError, ValueError, IndexError):
+                    continue
+                condition = forecast_condition_from_response(
+                    response, DEFAULT_WEATHER_ENTITY
+                )
+                if condition:
+                    break
+            _weather_forecast_cache[DEFAULT_WEATHER_ENTITY] = (now, condition)
+            return condition
+
+    def _weather_extras(self) -> dict[str, Any]:
+        """Return today's outdoor AQI and any heat advisory for the sidebar."""
+        with self.inventory._cache_lock:
+            entities = list((self.inventory._cached_entities or {}).values())
+        aqi_entity = outdoor_aqi_entity(entities)
+        aqi = None
+        if aqi_entity:
+            aqi = {
+                "value": round(float(str(aqi_entity.get("state")))),
+                "entity_id": aqi_entity.get("entity_id"),
+                "name": aqi_entity.get("friendly_name") or aqi_entity.get("entity_id"),
+            }
+        alert_entities = heat_alert_entities(entities)
+        states = []
+        for entity in alert_entities:
+            try:
+                states.append(self.inventory.fetch_state(str(entity["entity_id"])))
+            except HomeAssistantAPIError:
+                continue
+        return {
+            "aqi": aqi,
+            "heat_advisory": heat_advisory_from_states(states),
+            "heat_alert_sources": len(alert_entities),
+        }
 
     def _access_catalog(self) -> dict[str, Any]:
         structure = home_structure_from_storage(self.inventory._config_directory)
@@ -12302,6 +12456,7 @@ class FutureHomesTechRequestHandler(BaseHTTPRequestHandler):
                     {"ok": False, "error": str(err)},
                 )
                 return
+            condition = str(weather.get("state") or "")
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -12309,6 +12464,10 @@ class FutureHomesTechRequestHandler(BaseHTTPRequestHandler):
                     "entity_id": DEFAULT_WEATHER_ENTITY,
                     "temperature": temperature,
                     "unit": unit,
+                    "condition": condition,
+                    "raining": condition in RAIN_CONDITIONS,
+                    "forecast_condition": self._weather_forecast_condition(),
+                    **self._weather_extras(),
                 },
             )
             return
