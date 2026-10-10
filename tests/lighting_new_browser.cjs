@@ -13,7 +13,7 @@ const { chromium } = require(process.env.FHT_PLAYWRIGHT || 'playwright');
     { entity_id: 'light.fht_kitchen_pendants', domain: 'light', friendly_name: 'Kitchen Pendants', state: 'off', area: 'Kitchen', floor: 'Main Floor' },
     { entity_id: 'light.fht_pantry_light', domain: 'light', friendly_name: 'Pantry Light', state: 'unavailable', area: 'Pantry', floor: 'Main Floor' },
     { entity_id: 'light.fht_master_bedroom_all_lights', domain: 'light', friendly_name: 'Master Bedroom All Lights', state: 'on', brightness: 90, area: 'Master Bedroom', floor: 'Upstairs' },
-    { entity_id: 'light.fht_porch_light', domain: 'light', friendly_name: 'Porch Light', state: 'on', brightness: null, area: 'Porch', floor: 'Main Floor' },
+    { entity_id: 'light.fht_porch_light', domain: 'light', friendly_name: 'Porch Light', state: 'on', brightness: null, supported_color_modes: ['onoff'], area: 'Porch', floor: 'Main Floor' },
   ];
   const browser = await chromium.launch({ headless: true });
   try {
@@ -44,7 +44,20 @@ const { chromium } = require(process.env.FHT_PLAYWRIGHT || 'playwright');
       assert.deepEqual(await page.locator('.lighting-row-name').allTextContents(), ['Bar Lights', 'Pendants', 'Light', 'Light', 'All Lights']);
       assert.equal(await page.locator('.lighting-row-value').first().textContent(), '78%');
       assert.equal(await page.locator('.lighting-row-switch').count(), 0, 'rows have no on/off switch');
-      assert.equal(await page.locator('[data-lighting-row="light.fht_porch_light"] .lighting-row-value').textContent(), '100%', 'an on/off light that is on reads 100%');
+      // An on/off-only light has no brightness bar and reads On, and dragging it does nothing.
+      const porchRow = page.locator('[data-lighting-row="light.fht_porch_light"]');
+      assert.equal(await porchRow.locator('.lighting-row-value').textContent(), 'On', 'an on/off light that is on reads On');
+      assert.equal(await porchRow.locator('.lighting-row-fill').count(), 0, 'an on/off light has no brightness bar');
+      assert.equal(await porchRow.getAttribute('role'), 'button');
+      await porchRow.scrollIntoViewIfNeeded();
+      const porchBox = await porchRow.boundingBox();
+      await page.mouse.move(porchBox.x + 20, porchBox.y + porchBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(porchBox.x + porchBox.width * 0.5, porchBox.y + porchBox.height / 2, { steps: 6 });
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      assert.equal(actions.length, 0, 'dragging an on/off light sends nothing');
+      assert.equal(await porchRow.locator('.lighting-row-fill').count(), 0, 'no bar appears while dragging an on/off light');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `no sideways scroll at ${width}px`);
 
       // Drag the Pendants row to about 50%.
@@ -118,6 +131,10 @@ const { chromium } = require(process.env.FHT_PLAYWRIGHT || 'playwright');
       const classicKitchen = page.locator('.lighting-area-card').filter({ hasText: 'Kitchen' });
       assert.deepEqual(await classicKitchen.locator('.lighting-room-button').allTextContents(), ['All off'], 'classic cards keep the room buttons');
       assert.equal(await page.locator('.lighting-area-card').filter({ hasText: 'Pantry' }).locator('.lighting-room-button').count(), 0);
+      const porchCard = page.locator('.lighting-control-card').filter({ has: page.locator('[data-lighting-entity-id="light.fht_porch_light"]') });
+      assert.equal(await porchCard.locator('.lighting-brightness-button, .lighting-item-range').count(), 0, 'classic on/off card has no brightness control');
+      const bedroomCard = page.locator('.lighting-control-card').filter({ has: page.locator('[data-lighting-entity-id="light.fht_master_bedroom_all_lights"]') });
+      assert.equal(await bedroomCard.locator('.lighting-brightness-button').count(), 1, 'classic dimmable card keeps its brightness control');
       await page.reload();
       await page.waitForTimeout(500);
       await page.evaluate(() => document.querySelector('[data-view="lighting"]').click());
