@@ -2766,3 +2766,8 @@ Homeowner-approved Stable release bringing together Beta 0.6.7–0.6.32:
 ## 0.8.40 (Beta)
 
 - Lighting: each room now has All on and All off buttons in its header, in place of the "2 on" count. The room's All Lights row is gone from the Lighting page, so turning on one light (Kitchen Bar Lights) no longer makes the room read as all lights on. Every light in the room still has its own row. The All Lights group stays in Home Assistant, so schedules, scenes, buttons and HomeKit that use it keep working.
+
+## 0.8.41 (Beta)
+
+- Lighting: the on/off switch is gone from each light. Tap the light itself to turn it on or off; the highlighted color shows which lights are on. Drag sideways across a light to set its brightness, as before; a drag or a scroll never toggles the light.
+- Lighting: a plain on/off light that is on now reads **100%** with a full bar, instead of **Off**.
