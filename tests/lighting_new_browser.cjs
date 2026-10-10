@@ -3,12 +3,13 @@ const assert = require('node:assert/strict');
 const { chromium } = require(process.env.FHT_PLAYWRIGHT || 'playwright');
 
 // New Lighting layout: counts at the top, rooms grouped by floor, drag a row
-// sideways to dim it, the switch toggles, All off asks first, and Classic view
-// brings back the original cards on this device.
+// sideways to dim it, the switch toggles, All off asks first, each room has
+// All on and All off, and Classic view brings back the original cards on this
+// device.
 (async () => {
   const html = fs.readFileSync('future_homes_tech_app/web/index.html', 'utf8');
   const entities = [
-    { entity_id: 'light.fht_kitchen_all_lights', domain: 'light', friendly_name: 'Kitchen All Lights', state: 'on', brightness: 200, area: 'Kitchen', floor: 'Main Floor' },
+    { entity_id: 'light.fht_kitchen_bar_lights', domain: 'light', friendly_name: 'Kitchen Bar Lights', state: 'on', brightness: 200, area: 'Kitchen', floor: 'Main Floor' },
     { entity_id: 'light.fht_kitchen_pendants', domain: 'light', friendly_name: 'Kitchen Pendants', state: 'off', area: 'Kitchen', floor: 'Main Floor' },
     { entity_id: 'light.fht_pantry_light', domain: 'light', friendly_name: 'Pantry Light', state: 'unavailable', area: 'Pantry', floor: 'Main Floor' },
     { entity_id: 'light.fht_master_bedroom_all_lights', domain: 'light', friendly_name: 'Master Bedroom All Lights', state: 'on', brightness: 90, area: 'Master Bedroom', floor: 'Upstairs' },
@@ -39,7 +40,7 @@ const { chromium } = require(process.env.FHT_PLAYWRIGHT || 'playwright');
 
       assert.deepEqual(await page.locator('.lighting-stat b').allTextContents(), ['2', '2', '1'], 'lights on, rooms lit, offline');
       assert.deepEqual(await page.locator('.lighting-floor-title').allTextContents(), ['Main Floor', 'Upstairs']);
-      assert.deepEqual(await page.locator('.lighting-row-name').allTextContents(), ['All Lights', 'Pendants', 'Light', 'All Lights']);
+      assert.deepEqual(await page.locator('.lighting-row-name').allTextContents(), ['Bar Lights', 'Pendants', 'Light', 'All Lights']);
       assert.equal(await page.locator('.lighting-row-value').first().textContent(), '78%');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `no sideways scroll at ${width}px`);
 
@@ -79,7 +80,21 @@ const { chromium } = require(process.env.FHT_PLAYWRIGHT || 'playwright');
       await page.waitForTimeout(150);
       const off = actions.pop();
       assert.equal(off.action, 'turn_off');
-      assert.deepEqual(off.entity_ids.sort(), ['light.fht_kitchen_all_lights', 'light.fht_kitchen_pendants']);
+      assert.deepEqual(off.entity_ids.sort(), ['light.fht_kitchen_bar_lights', 'light.fht_kitchen_pendants']);
+
+      // Each room has All on and All off instead of an "N on" count; each
+      // sends only the lights that need it, and is disabled when none do.
+      const kitchen = page.locator('.lighting-room').filter({ hasText: 'Kitchen' });
+      assert.deepEqual(await kitchen.locator('.lighting-room-button').allTextContents(), ['All on', 'All off']);
+      assert.equal(await kitchen.locator('[data-lighting-room-action="off"]').isDisabled(), true, 'nothing on to turn off');
+      await kitchen.locator('[data-lighting-room-action="on"]').click();
+      await page.waitForTimeout(150);
+      assert.deepEqual(actions.pop(), { action: 'turn_on', entity_ids: ['light.fht_kitchen_bar_lights', 'light.fht_kitchen_pendants'], brightness_pct: null });
+      assert.equal(await kitchen.locator('[data-lighting-room-action="on"]').isDisabled(), true, 'all on already');
+      const pantry = page.locator('.lighting-room').filter({ hasText: 'Pantry' });
+      assert.equal(await pantry.locator('.lighting-room-button:not([disabled])').count(), 0, 'offline room has nothing to switch');
+      const head = await kitchen.locator('.lighting-room-head').boundingBox();
+      assert.ok(head.height < 56, `room header stays one line at ${width}px (${head.height}px)`);
 
       // Classic view brings back the original cards, and stays after a reload.
       await page.locator('#lighting-layout-toggle').click();
@@ -87,6 +102,7 @@ const { chromium } = require(process.env.FHT_PLAYWRIGHT || 'playwright');
       assert.equal(await page.locator('.lighting-row').count(), 0);
       assert.equal(await page.locator('#lighting-layout-toggle').textContent(), 'New view');
       assert.equal(await page.locator('#lighting-all-off').isVisible(), false);
+      assert.equal(await page.locator('.lighting-area-card .lighting-room-button').count(), 6, 'classic cards keep All on and All off');
       await page.reload();
       await page.waitForTimeout(500);
       await page.evaluate(() => document.querySelector('[data-view="lighting"]').click());

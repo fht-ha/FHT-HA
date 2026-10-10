@@ -2757,3 +2757,7 @@ Homeowner-approved Stable release bringing together Beta 0.6.7–0.6.32:
 ## 0.8.38 (Beta)
 
 - Apple HomeKit: the App no longer restarts your HomeKit bridges when it regenerates light groups. It used to ask Home Assistant to reload all YAML, which also reloads every HomeKit bridge. When one of those reloads failed, Home Assistant left the bridge stopped ("cannot be unloaded … FAILED_UNLOAD"), so it dropped off the network and Apple Home lost its devices until Home Assistant restarted. The App now reloads only the light groups and their names. A changed HomeKit selection takes effect at the next Home Assistant restart, as the Apple HomeKit page already says.
+
+## 0.8.39 (Beta)
+
+- Lighting: each room now has All on and All off buttons in its header, in place of the "2 on" count. The room's All Lights row is gone from the Lighting page, so turning on one light (Kitchen Bar Lights) no longer makes the room read as all lights on. Every light in the room still has its own row. The All Lights group stays in Home Assistant, so schedules, scenes, buttons and HomeKit that use it keep working.

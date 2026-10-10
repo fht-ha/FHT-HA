@@ -4666,6 +4666,35 @@ class ServerTests(unittest.TestCase):
                     publisher.light_action("toggle", ["light.bedroom_6_fan_light_1"])
         self.assertEqual(calls, [("light", "toggle", {"entity_id": ["light.outside_perimeter_porch_light"]})])
 
+    def test_lighting_hides_room_all_lights_but_keeps_single_room_light(self) -> None:
+        """Kitchen All Lights reads on when Bar Lights is; rooms use All on and All off instead."""
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory, "groups.yaml")
+            package.write_text(
+                "# fht_standalone_light: light.kitchen_fan_light\n"
+                "light:\n"
+                "  - platform: group\n    name: \"FHT - Kitchen All Lights\"\n"
+                "    unique_id: fht_kitchen_all_lights\n    entities:\n      - light.kitchen_bar_light_1\n\n"
+                "  - platform: group\n    name: \"FHT - Kitchen Bar Lights\"\n"
+                "    unique_id: fht_kitchen_bar_lights\n    entities:\n      - light.kitchen_bar_light_1\n\n"
+                "  - platform: group\n    name: \"FHT - Dining Room Light\"\n"
+                "    unique_id: fht_dining_room_all_lights\n    entities:\n      - light.dining_room_light_1\n\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                SERVER.lighting_entity_ids(package),
+                {"light.fht_kitchen_bar_lights", "light.fht_dining_room_all_lights", "light.kitchen_fan_light"},
+            )
+            publisher = SERVER.HomeAssistantHelperPublisher("token", "http://example/services")
+            calls = []
+            with patch.object(publisher, "_call_service", side_effect=lambda *args: calls.append(args)), \
+                    patch.object(SERVER.lighting_entity_ids, "__defaults__", (package,)):
+                publisher.light_action("turn_on", ["light.fht_kitchen_bar_lights", "light.kitchen_fan_light"])
+        self.assertEqual(
+            calls,
+            [("light", "turn_on", {"entity_id": ["light.fht_kitchen_bar_lights", "light.kitchen_fan_light"]})],
+        )
+
     def test_old_room_lights_helper_folds_into_singular_room_light(self) -> None:
         """An old area-less Dining Room Lights helper joins the App's Dining Room Light."""
         entities = [
