@@ -2760,4 +2760,9 @@ Homeowner-approved Stable release bringing together Beta 0.6.7–0.6.32:
 
 ## 0.8.39 (Beta)
 
+- Lighting: every room now shows under the floor its Home Assistant area is assigned to. Rooms whose lights are App light groups (such as Dining Room Light) had no floor of their own and could land under the wrong heading; their floor now comes from the room's area, the same as every other light in it.
+- Lighting and every other page: moving an area to another floor, or a device to another area, in Home Assistant now shows in the App within about 15 seconds. Home Assistant saves those changes a few seconds after announcing them, so the App now reads them again once they are saved instead of keeping the old floor until it restarted.
+
+## 0.8.40 (Beta)
+
 - Lighting: each room now has All on and All off buttons in its header, in place of the "2 on" count. The room's All Lights row is gone from the Lighting page, so turning on one light (Kitchen Bar Lights) no longer makes the room read as all lights on. Every light in the room still has its own row. The All Lights group stays in Home Assistant, so schedules, scenes, buttons and HomeKit that use it keep working.

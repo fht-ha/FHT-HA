@@ -4298,6 +4298,65 @@ class ServerTests(unittest.TestCase):
 
         self.assertEqual(mocked_urlopen.call_count, 1)
 
+    def test_lighting_rooms_follow_their_area_floor(self) -> None:
+        """Place each Lighting room on its Home Assistant Area's Floor."""
+        payload = [
+            {
+                "entity_id": "light.fht_dining_room_light",
+                "state": "off",
+                "attributes": {"friendly_name": "Dining Room Light", "fht_area": "Dining Room"},
+            },
+            {
+                "entity_id": "light.office_lamp",
+                "state": "off",
+                "attributes": {"friendly_name": "Office Lamp", "fht_area": "Office"},
+            },
+            {
+                "entity_id": "light.shed_light",
+                "state": "off",
+                "attributes": {"friendly_name": "Shed Light", "fht_area": "Shed"},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            storage = Path(directory) / ".storage"
+            storage.mkdir()
+            registries = {
+                "core.floor_registry": {"floors": [
+                    {"floor_id": "main", "name": "Main Floor", "level": 0},
+                    {"floor_id": "upstairs", "name": "Upstairs", "level": 1},
+                ]},
+                "core.area_registry": {"areas": [
+                    {"area_id": "dining_room", "name": "Dining Room", "floor_id": "main"},
+                    {"area_id": "office", "name": "Office", "floor_id": "upstairs"},
+                    {"area_id": "shed", "name": "Shed"},
+                ]},
+                "core.device_registry": {"devices": [{"id": "lamp", "area_id": "office"}]},
+                # Generated groups carry no registry area, only the room they
+                # light; the lamp's own area was deleted, so its device's applies.
+                "core.entity_registry": {"entities": [
+                    {"entity_id": "light.fht_dining_room_light"},
+                    {"entity_id": "light.office_lamp", "device_id": "lamp", "area_id": "deleted"},
+                ]},
+            }
+            for name, data in registries.items():
+                storage.joinpath(name).write_text(json.dumps({"data": data}), encoding="utf-8")
+            inventory_service = SERVER.EntityInventory(
+                token="test-token",
+                states_url="http://homeassistant.test/api/states",
+                websocket_url="ws://homeassistant.test/api/websocket",
+                config_directory=Path(directory),
+            )
+            with (
+                patch.object(SERVER, "urlopen", return_value=MockResponse(payload)),
+                patch.object(SERVER, "fetch_entity_integrations", return_value={}),
+            ):
+                inventory = inventory_service.fetch(include_all=True)
+
+        floors = {entity["entity_id"]: (entity["area"], entity["floor"]) for entity in inventory["entities"]}
+        self.assertEqual(floors["light.fht_dining_room_light"], ("Dining Room", "Main Floor"))
+        self.assertEqual(floors["light.office_lamp"], ("Office", "Upstairs"))
+        self.assertEqual(floors["light.shed_light"], ("Shed", ""))
+
     def test_state_change_event_updates_snapshot_and_revision(self) -> None:
         """Merge a live state event without another full-state request."""
         payload = [
