@@ -2771,3 +2771,8 @@ Homeowner-approved Stable release bringing together Beta 0.6.7–0.6.32:
 
 - Lighting: the on/off switch is gone from each light. Tap the light itself to turn it on or off; the highlighted color shows which lights are on. Drag sideways across a light to set its brightness, as before; a drag or a scroll never toggles the light.
 - Lighting: a plain on/off light that is on now reads **100%** with a full bar, instead of **Off**.
+
+## 0.8.42 (Beta)
+
+- Lighting: a room shows only the All on or All off button it can use. When every light in the room is off you see just All on, when they're all on just All off, and a room whose lights are all offline shows neither. Before, the button with nothing to do was greyed out.
+- Lighting: All on turns each light on at the brightness its presence sensor uses in the current mode (Day, Night or Sleep, or the room's own mode such as Sleep when it's turned on for that room), including the Kelvin tone when one is set. A light no presence sensor covers comes back at its last brightness.

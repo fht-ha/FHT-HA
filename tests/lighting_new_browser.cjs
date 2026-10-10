@@ -97,16 +97,15 @@ const { chromium } = require(process.env.FHT_PLAYWRIGHT || 'playwright');
       assert.deepEqual(off.entity_ids.sort(), ['light.fht_kitchen_pendants'], 'only the light still on after the taps');
 
       // Each room has All on and All off instead of an "N on" count; each
-      // sends only the lights that need it, and is disabled when none do.
+      // sends only the lights that need it, and is left out when none do.
       const kitchen = page.locator('.lighting-room').filter({ hasText: 'Kitchen' });
-      assert.deepEqual(await kitchen.locator('.lighting-room-button').allTextContents(), ['All on', 'All off']);
-      assert.equal(await kitchen.locator('[data-lighting-room-action="off"]').isDisabled(), true, 'nothing on to turn off');
+      assert.deepEqual(await kitchen.locator('.lighting-room-button').allTextContents(), ['All on'], 'nothing on to turn off');
       await kitchen.locator('[data-lighting-room-action="on"]').click();
       await page.waitForTimeout(150);
       assert.deepEqual(actions.pop(), { action: 'turn_on', entity_ids: ['light.fht_kitchen_bar_lights', 'light.fht_kitchen_pendants'], brightness_pct: null });
-      assert.equal(await kitchen.locator('[data-lighting-room-action="on"]').isDisabled(), true, 'all on already');
+      assert.deepEqual(await kitchen.locator('.lighting-room-button').allTextContents(), ['All off'], 'all on already');
       const pantry = page.locator('.lighting-room').filter({ hasText: 'Pantry' });
-      assert.equal(await pantry.locator('.lighting-room-button:not([disabled])').count(), 0, 'offline room has nothing to switch');
+      assert.equal(await pantry.locator('.lighting-room-actions').count(), 0, 'offline room has nothing to switch');
       const head = await kitchen.locator('.lighting-room-head').boundingBox();
       assert.ok(head.height < 56, `room header stays one line at ${width}px (${head.height}px)`);
 
@@ -116,7 +115,9 @@ const { chromium } = require(process.env.FHT_PLAYWRIGHT || 'playwright');
       assert.equal(await page.locator('.lighting-row').count(), 0);
       assert.equal(await page.locator('#lighting-layout-toggle').textContent(), 'New view');
       assert.equal(await page.locator('#lighting-all-off').isVisible(), false);
-      assert.equal(await page.locator('.lighting-area-card .lighting-room-button').count(), 8, 'classic cards (four rooms) keep All on and All off');
+      const classicKitchen = page.locator('.lighting-area-card').filter({ hasText: 'Kitchen' });
+      assert.deepEqual(await classicKitchen.locator('.lighting-room-button').allTextContents(), ['All off'], 'classic cards keep the room buttons');
+      assert.equal(await page.locator('.lighting-area-card').filter({ hasText: 'Pantry' }).locator('.lighting-room-button').count(), 0);
       await page.reload();
       await page.waitForTimeout(500);
       await page.evaluate(() => document.querySelector('[data-view="lighting"]').click());
