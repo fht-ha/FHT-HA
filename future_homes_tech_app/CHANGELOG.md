@@ -2757,3 +2757,8 @@ Homeowner-approved Stable release bringing together Beta 0.6.7–0.6.32:
 ## 0.8.38 (Beta)
 
 - Apple HomeKit: the App no longer restarts your HomeKit bridges when it regenerates light groups. It used to ask Home Assistant to reload all YAML, which also reloads every HomeKit bridge. When one of those reloads failed, Home Assistant left the bridge stopped ("cannot be unloaded … FAILED_UNLOAD"), so it dropped off the network and Apple Home lost its devices until Home Assistant restarted. The App now reloads only the light groups and their names. A changed HomeKit selection takes effect at the next Home Assistant restart, as the Apple HomeKit page already says.
+
+## 0.8.39 (Beta)
+
+- Lighting: every room now shows under the floor its Home Assistant area is assigned to. Rooms whose lights are App light groups (such as Dining Room Light) had no floor of their own and could land under the wrong heading; their floor now comes from the room's area, the same as every other light in it.
+- Lighting and every other page: moving an area to another floor, or a device to another area, in Home Assistant now shows in the App within about 15 seconds. Home Assistant saves those changes a few seconds after announcing them, so the App now reads them again once they are saved instead of keeping the old floor until it restarted.

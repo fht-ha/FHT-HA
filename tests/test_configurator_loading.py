@@ -317,6 +317,16 @@ class ConfiguratorLoadingTests(unittest.TestCase):
         inventory._fetch_full_inventory.assert_called_once()
         inventory.stop_live_updates()
 
+    def test_registry_change_is_read_again_once_home_assistant_saves_it(self):
+        inventory = self.inventory()
+        second = threading.Event()
+        inventory._fetch_full_inventory = Mock(side_effect=lambda: inventory._fetch_full_inventory.call_count == 2 and second.set())
+        with patch.object(SERVER, "REGISTRY_SAVE_DELAY_SECONDS", 0.05):
+            inventory._schedule_registry_refresh()
+            self.assertTrue(second.wait(2))
+        self.assertEqual(inventory._fetch_full_inventory.call_count, 2)
+        inventory.stop_live_updates()
+
     def test_state_event_survives_concurrent_snapshot(self):
         inventory = self.inventory()
         old = {"entity_id": "light.one", "state": "off", "attributes": {}}

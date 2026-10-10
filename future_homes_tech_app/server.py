@@ -100,6 +100,8 @@ DEFAULT_HOME_ASSISTANT_SERVICES_URL = (
 )
 ENTITY_CACHE_FALLBACK_TTL_SECONDS = 60
 ENTITY_EVENT_HISTORY_LIMIT = 512
+# Home Assistant saves registry changes to .storage about 10 seconds later.
+REGISTRY_SAVE_DELAY_SECONDS = 12
 ENTITY_LIVE_RECONNECT_MAX_SECONDS = 30
 APP_INFO_CACHE_TTL_SECONDS = 60
 PHONE_NOTIFY_CACHE_TTL_SECONDS = 300
@@ -8346,6 +8348,11 @@ def entity_floors_from_storage(
         for area in areas
         if (area.get("area_id") or area.get("id")) and area.get("floor_id")
     }
+    area_ids = {
+        str(area.get("area_id") or area.get("id"))
+        for area in areas
+        if area.get("area_id") or area.get("id")
+    }
     device_areas = {
         str(device["id"]): str(device["area_id"])
         for device in devices
@@ -8356,13 +8363,27 @@ def entity_floors_from_storage(
         entity_id = _clean_value(entity.get("entity_id"))
         if not entity_id:
             continue
-        area_id = entity.get("area_id") or device_areas.get(
-            str(entity.get("device_id") or "")
-        )
-        floor_name = floor_names.get(area_floors.get(str(area_id or ""), ""))
+        # Same rule as entity_areas_from_storage: an entity area that points
+        # at a deleted area falls back to the device's area.
+        area_id = str(entity.get("area_id") or "")
+        if area_id not in area_ids:
+            area_id = device_areas.get(str(entity.get("device_id") or ""), "")
+        floor_name = floor_names.get(area_floors.get(area_id, ""))
         if floor_name:
             entity_floors[entity_id] = floor_name
     return entity_floors
+
+
+def area_floors_from_storage(
+    config_directory: Path = DEFAULT_HOME_ASSISTANT_CONFIG_DIR,
+) -> dict[str, str]:
+    """Map every registered Area name to its Floor name ("" when none)."""
+    structure = home_structure_from_storage(config_directory)
+    return {
+        area["name"]: floor["name"] if floor.get("floor_id") else ""
+        for floor in structure["floors"]
+        for area in floor["areas"]
+    }
 
 
 def home_configurator_floor_sort_key(
@@ -10126,6 +10147,16 @@ class EntityInventory:
                         self._registry_refresh_pending = False
                     if not self._live_stop.is_set():
                         self._fetch_full_inventory()
+                # Home Assistant writes its registry files a few seconds
+                # after the change event, so the first read can still see
+                # the old Floor or Area; read them again once saved.
+                if self._live_stop.wait(REGISTRY_SAVE_DELAY_SECONDS):
+                    return
+                with self._refresh_lock:
+                    with self._cache_lock:
+                        if self._registry_refresh_pending:
+                            return
+                    self._fetch_full_inventory()
             except (HomeAssistantAPIError, OSError, ValueError) as error:
                 self._set_live_connection(False, str(error))
 
@@ -10656,6 +10687,7 @@ class EntityInventory:
         registry_floors = entity_floors_from_storage(
             self._config_directory
         )
+        area_floors = area_floors_from_storage(self._config_directory)
         registry_control_metadata = entity_control_metadata_from_storage(
             self._config_directory
         )
@@ -10670,7 +10702,14 @@ class EntityInventory:
                 entity["entity_id"],
                 "",
             )
-            entity["floor"] = registry_floors.get(entity["entity_id"], "")
+            # A room's floor is its Home Assistant area's floor. Generated
+            # light groups have no registry area, only the room they light
+            # (fht_area), so their floor comes from that room too.
+            entity["floor"] = (
+                area_floors[entity["area"]]
+                if entity.get("area") in area_floors
+                else registry_floors.get(entity["entity_id"], "")
+            )
             entity["device_id"] = metadata.get("device_id", "")
             entity["original_name"] = metadata.get("original_name", "")
             entity["entity_category"] = metadata.get("entity_category", "")
