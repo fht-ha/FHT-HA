@@ -913,11 +913,7 @@
       .lighting-row:not(.is-on) .lighting-row-value { color: rgb(255 255 255 / 55%); }
       .lighting-row.is-unavailable { cursor: not-allowed; }
       .lighting-row.is-unavailable .lighting-row-value { color: var(--danger); }
-      .lighting-row-switch { position: relative; flex: none; width: 44px; height: 26px; padding: 0; border: 0; border-radius: 13px; background: #2a3846; cursor: pointer; }
-      .lighting-row-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #a9b8c6; transition: left 160ms ease; }
-      .lighting-row.is-on .lighting-row-switch { background: #ffb347; }
-      .lighting-row.is-on .lighting-row-switch::after { left: 21px; background: #fff; }
-      .lighting-row-switch:disabled { opacity: .45; cursor: not-allowed; }
+      .lighting-row:not(.is-unavailable):active { background: rgb(255 199 107 / 8%); }
       .lighting-row.is-pending::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 20%, rgb(255 199 107 / 18%) 50%, transparent 80%); transform: translateX(-100%); animation: lighting-action-sweep 900ms linear infinite; pointer-events: none; }
 
       .lighting-control-card.is-pending::after {
@@ -3842,7 +3838,7 @@
           <img src="future-homes-tech-logo.png" alt="">
           <div class="brand-text">
             <div class="brand-name">Future Homes <span class="brand-accent">Tech</span></div>
-        <div class="brand-version">V 0.8.40</div>
+        <div class="brand-version">V 0.8.41</div>
         <div class="brand-beta" id="brand-beta" hidden>BETA</div>
             <div class="brand-temperature" id="brand-temperature">—</div>
           </div>
@@ -4330,7 +4326,7 @@
       const SECURITY_LIVE_REFRESH_INTERVAL_MS = LIVE_STATE_FALLBACK_INTERVAL_MS;
       const TEMPERATURE_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
       const OFFLINE_COUNT_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-      const CLIENT_VERSION = "0.8.40";
+      const CLIENT_VERSION = "0.8.41";
       let appColor = "blue";
       function applyAppColor(value) {
         appColor = ["blue", "red", "green"].includes(value) ? value : "blue";
@@ -5418,9 +5414,10 @@
 
       function lightingBrightness(entity) {
         if (String(entity.state || "").toLowerCase() !== "on") return 0;
+        // On/off devices report no brightness, so an on one reads 100%.
         const rawBrightness = Number(entity.brightness);
-        return Number.isFinite(rawBrightness)
-          ? Math.round((rawBrightness / 255) * 100)
+        return Number.isFinite(rawBrightness) && rawBrightness > 0
+          ? Math.max(1, Math.round((rawBrightness / 255) * 100))
           : 100;
       }
 
@@ -5571,13 +5568,10 @@
                     const pending = lightingPendingActions.has(group.entity_id);
                     const id = escapeHtml(group.entity_id);
                     return `<div class="lighting-row is-${statusClass}${pending ? " is-pending" : ""}" data-lighting-row="${id}"
-                        role="slider" tabindex="0" aria-label="${label} brightness" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${brightness}">
+                        role="slider" tabindex="0" aria-label="${label} brightness, tap to turn ${statusClass === "on" ? "off" : "on"}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${brightness}">
                       ${brightness ? `<span class="lighting-row-fill" data-fill="${brightness}"></span>` : ""}
                       <span class="lighting-row-name">${label}</span>
                       <span class="lighting-row-value">${statusClass === "unavailable" ? "Offline" : brightness ? `${brightness}%` : "Off"}</span>
-                      <button class="lighting-row-switch" type="button" data-lighting-entity-id="${id}"
-                        aria-label="Turn ${label} ${statusClass === "on" ? "off" : "on"}" aria-pressed="${statusClass === "on"}"
-                        ${statusClass === "unavailable" ? "disabled" : ""}></button>
                     </div>`;
                   }).join("")}
                 </article>`;
@@ -10738,9 +10732,11 @@
           brightnessButton.closest(".lighting-control-card")?.classList.toggle("brightness-open");
           return;
         }
-        const button = event.target.closest?.(".lighting-name-toggle, .lighting-row-switch");
-        if (!button) return;
-        const entityId = button.dataset.lightingEntityId;
+        const button = event.target.closest?.(".lighting-name-toggle");
+        if (button) toggleLightingGroup(button.dataset.lightingEntityId);
+      });
+
+      function toggleLightingGroup(entityId) {
         const group = lightingGroupsById.get(entityId);
         if (
           !group
@@ -10765,7 +10761,7 @@
           lightingState.hidden = false;
           loadLighting(false);
         });
-      });
+      }
 
       lightingAreaGrid.addEventListener("input", (event) => {
         const range = event.target.closest?.(".lighting-item-range");
@@ -10804,12 +10800,14 @@
         });
       }
 
-      // Dragging sideways across a row dims it; a tap does nothing, so
-      // scrolling past a light never changes it.
+      // Tapping a row turns the light on or off; dragging sideways across it
+      // dims it. Moving the finger more than a few pixels (a drag or a
+      // scroll) is never a tap, so dimming or scrolling past a light never
+      // toggles it.
       let lightingDrag = null;
       lightingAreaGrid.addEventListener("pointerdown", (event) => {
         const row = event.target.closest?.(".lighting-row");
-        if (!row || event.target.closest(".lighting-row-switch") || row.classList.contains("is-unavailable")) return;
+        if (!row || row.classList.contains("is-unavailable")) return;
         lightingDrag = { row, startX: event.clientX, startY: event.clientY, value: null, pointerId: event.pointerId };
       });
       lightingAreaGrid.addEventListener("pointermove", (event) => {
@@ -10838,20 +10836,27 @@
       });
       const endLightingDrag = (event) => {
         if (!lightingDrag || event.pointerId !== lightingDrag.pointerId) return;
-        const { row, value } = lightingDrag;
+        const { row, value, startX, startY } = lightingDrag;
         lightingDrag = null;
         row.classList.remove("is-dragging");
         if (value !== null && event.type === "pointerup") setLightingBrightness(row.dataset.lightingRow, value);
         else if (value !== null) renderLighting([...lightingGroupsById.values()]);
+        else if (event.type === "pointerup" && Math.hypot(event.clientX - startX, event.clientY - startY) < 8) {
+          toggleLightingGroup(row.dataset.lightingRow);
+        }
       };
       lightingAreaGrid.addEventListener("pointerup", endLightingDrag);
       lightingAreaGrid.addEventListener("pointercancel", endLightingDrag);
       lightingAreaGrid.addEventListener("keydown", (event) => {
         const row = event.target.closest?.(".lighting-row");
-        if (!row || event.target !== row || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+        if (!row || event.target !== row || !["ArrowLeft", "ArrowRight", "Enter", " "].includes(event.key)) return;
         event.preventDefault();
         const group = lightingGroupsById.get(row.dataset.lightingRow);
         if (!group || lightingStateClass(group) === "unavailable") return;
+        if (event.key === "Enter" || event.key === " ") {
+          toggleLightingGroup(group.entity_id);
+          return;
+        }
         const step = event.key === "ArrowRight" ? 10 : -10;
         setLightingBrightness(group.entity_id, Math.max(1, Math.min(100, lightingBrightness(group) + step)));
       });
