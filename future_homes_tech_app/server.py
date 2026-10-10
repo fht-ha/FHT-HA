@@ -7749,12 +7749,20 @@ def lighting_entity_ids(
     """Return the generated groups and standalone lights Lighting shows.
 
     None when there is no generated package, so every App group shows.
+    A room's All Lights group stays off Lighting: its other rows already
+    cover every light, and the group reads on when any one light is on.
     """
     try:
         content = package_path.read_text(encoding="utf-8")
     except OSError:
         return None
     unique_ids = re.findall(r"^\s+unique_id:\s+(fht_[a-z0-9_]+)\s*$", content, flags=re.MULTILINE)
+    all_lights = re.findall(
+        r'^\s+name:\s+"[^"\n]* All Lights"\s*\n\s+unique_id:\s+(fht_[a-z0-9_]+)\s*$',
+        content,
+        flags=re.MULTILINE,
+    )
+    unique_ids = [unique_id for unique_id in unique_ids if unique_id not in all_lights]
     standalone = re.findall(r"^# fht_standalone_light: (light\.[a-z0-9_]+)$", content, flags=re.MULTILINE)
     return {f"light.{unique_id}" for unique_id in unique_ids} | set(standalone)
 
@@ -9624,8 +9632,8 @@ class HomeAssistantHelperPublisher:
         if action == "toggle" and len(valid_entity_ids) == 1:
             self._call_service("light", "toggle", service_data)
             return
-        if action == "turn_off":
-            self._call_service("light", "turn_off", service_data)
+        if action in {"turn_on", "turn_off"}:
+            self._call_service("light", action, service_data)
             return
         if action == "set_brightness" and len(valid_entity_ids) == 1:
             brightness = max(1, min(100, int(float(brightness_pct))))
