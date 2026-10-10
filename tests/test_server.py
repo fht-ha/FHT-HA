@@ -2727,6 +2727,47 @@ class ServerTests(unittest.TestCase):
             "http://supervisor/core/api/states/weather.forecast_home",
         )
 
+    def test_sidebar_weather_reads_aqi_heat_alerts_and_forecast(self) -> None:
+        """Pick the outdoor AQI, spot heat alerts and read the next forecast."""
+        entities = [
+            {"entity_id": "sensor.office_air_aqi", "domain": "sensor", "device_class": "aqi", "state": "12", "area": "Office"},
+            {"entity_id": "sensor.airnow_aqi", "domain": "sensor", "device_class": "aqi", "state": "87", "integration": "airnow"},
+            {"entity_id": "sensor.broken_aqi", "domain": "sensor", "device_class": "aqi", "state": "unavailable"},
+            {"entity_id": "sensor.nws_alerts", "domain": "sensor", "state": "1"},
+            {"entity_id": "binary_sensor.heat_advisory", "domain": "binary_sensor", "state": "off"},
+            {"entity_id": "sensor.kitchen_temperature", "domain": "sensor", "state": "72"},
+        ]
+        self.assertEqual(SERVER.outdoor_aqi_entity(entities)["entity_id"], "sensor.airnow_aqi")
+        self.assertEqual(SERVER.outdoor_aqi_entity(entities[:1])["entity_id"], "sensor.office_air_aqi")
+        self.assertIsNone(SERVER.outdoor_aqi_entity(entities[2:]))
+        self.assertEqual(
+            [entity["entity_id"] for entity in SERVER.heat_alert_entities(entities)],
+            ["sensor.nws_alerts", "binary_sensor.heat_advisory"],
+        )
+        self.assertEqual(
+            SERVER.heat_advisory_from_states([
+                {"entity_id": "binary_sensor.heat_advisory", "state": "off", "attributes": {}},
+                {"entity_id": "sensor.nws_alerts", "state": "1", "attributes": {"Alerts": [{"Event": "Excessive Heat Warning"}]}},
+            ]),
+            "Excessive Heat",
+        )
+        self.assertEqual(
+            SERVER.heat_advisory_from_states([{"entity_id": "binary_sensor.heat_advisory", "state": "on", "attributes": {}}]),
+            "Heat Advisory",
+        )
+        self.assertIsNone(
+            SERVER.heat_advisory_from_states([{"entity_id": "sensor.nws_alerts", "state": "1", "attributes": {"Alerts": [{"Event": "Flood Watch"}]}}])
+        )
+        self.assertEqual(
+            SERVER.forecast_condition_from_response(
+                {"response": {"weather.forecast_home": {"forecast": [{"condition": "rainy"}, {"condition": "sunny"}]}}},
+                "weather.forecast_home",
+            ),
+            "rainy",
+        )
+        self.assertIsNone(SERVER.forecast_condition_from_response({}, "weather.forecast_home"))
+        self.assertEqual(SERVER.RAIN_CONDITIONS, {"rainy", "pouring", "lightning-rainy"})
+
     def test_persists_switch_light_group_assignments(self) -> None:
         """Save, read, and remove switch-to-FHT-group selections."""
         with tempfile.TemporaryDirectory() as temporary_directory:

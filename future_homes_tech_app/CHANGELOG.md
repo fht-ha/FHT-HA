@@ -2780,3 +2780,10 @@ Homeowner-approved Stable release bringing together Beta 0.6.7–0.6.32:
 ## 0.8.43 (Beta)
 
 - Lighting: a light that can only turn on and off (not dim) no longer shows a brightness bar. Its row reads **On** or **Off**, a tap switches it, and dragging across it does nothing. In Classic view its card has no brightness button. Lights that can dim keep the bar and the drag to set brightness.
+
+## 0.8.44 (Beta)
+
+- Sidebar: a weather icon now sits next to the outdoor temperature, showing today's forecast from your Home Assistant weather entity (sun, clouds, rain, storms, snow, fog or wind).
+- Sidebar: when it is raining, a small **Raining** card (or **Heavy rain** / **Thunderstorms**) appears under the temperature. It goes away on its own when the rain stops.
+- Sidebar: today's air quality shows as an **AQI** badge, colored by the EPA scale, when Home Assistant has an outdoor AQI sensor (AirNow, WAQI, IQAir AirVisual, Google Air Quality and similar).
+- Sidebar: an orange **Heat Advisory** (or **Excessive Heat**) flag appears while one is in effect, read from a weather alerts sensor such as NWS Alerts. The badge and flag stay hidden when Home Assistant has no sensor for them.

@@ -243,9 +243,32 @@ for (const [name, stateName, loader, activeView] of [
   assert.equal(fallback[stateName], false);
 }
 
-const temperature = contextFor(["loadBrandTemperature"], {requestJson:async () => ({temperature:null}), brandTemperature:{textContent:""}});
+const temperature = contextFor(["loadBrandTemperature"], {requestJson:async () => ({temperature:null}), brandTemperature:{textContent:""}, renderBrandWeather:() => {}});
 await temperature.loadBrandTemperature();
 assert.equal(temperature.brandTemperature.textContent, "—");
+
+const weatherSource = source.slice(source.indexOf("      const WEATHER_ICON_PATHS"), source.indexOf("      function weatherIcon("));
+const weatherElement = () => ({hidden:true, innerHTML:"", textContent:"", title:"", dataset:{}, style:{setProperty(name, value) { this[name] = value; }}, setAttribute(name, value) { this[name] = value; }});
+const weather = vm.createContext({
+  brandForecastIcon:weatherElement(), brandRainCard:weatherElement(), brandAqi:weatherElement(), brandHeatAdvisory:weatherElement(),
+  escapeHtml:value => String(value),
+});
+vm.runInContext(weatherSource.replaceAll("const ", "var ") + ["weatherIcon", "renderBrandWeather"].map(functionSource).join("\n"), weather);
+weather.renderBrandWeather({condition:"pouring", forecast_condition:"lightning-rainy", aqi:{value:112.4}, heat_advisory:"Excessive Heat"});
+assert.equal(weather.brandRainCard.hidden, false);
+assert.match(weather.brandRainCard.innerHTML, /Heavy rain/);
+assert.equal(weather.brandForecastIcon.hidden, false);
+assert.equal(weather.brandForecastIcon.title, "Forecast: Thunderstorms");
+assert.equal(weather.brandAqi.textContent, "AQI 112");
+assert.equal(weather.brandAqi.style["--aqi-color"], "#ff9933");
+assert.match(weather.brandHeatAdvisory.innerHTML, /Excessive Heat/);
+weather.renderBrandWeather({condition:"sunny", forecast_condition:"partlycloudy", aqi:null, heat_advisory:null});
+assert.equal(weather.brandRainCard.hidden, true);
+assert.equal(weather.brandForecastIcon.title, "Forecast: Partly cloudy");
+assert.equal(weather.brandAqi.hidden, true);
+assert.equal(weather.brandHeatAdvisory.hidden, true);
+weather.renderBrandWeather({});
+assert.equal(weather.brandForecastIcon.hidden, true);
 
 const targetControl = {disabled:false, value:"button.chime_play_chime", checked:true};
 const inactiveAlarmControls = [{disabled:true, checked:false}, {disabled:true, value:"5"}];

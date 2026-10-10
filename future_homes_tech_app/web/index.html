@@ -201,7 +201,108 @@
         color: #fff;
         font-size: 18px;
         font-weight: 800;
+      }
+
+      .brand-weather {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
         margin-top: 2px;
+      }
+
+      .brand-weather-now {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+
+      .brand-forecast-icon {
+        display: inline-flex;
+        color: #ffd27a;
+      }
+
+      .brand-forecast-icon svg {
+        width: 22px;
+        height: 22px;
+      }
+
+      .brand-forecast-icon[data-condition*="rain"],
+      .brand-forecast-icon[data-condition="pouring"],
+      .brand-forecast-icon[data-condition*="snow"],
+      .brand-forecast-icon[data-condition="hail"] {
+        color: #7cc4f2;
+      }
+
+      .brand-forecast-icon:is([data-condition="cloudy"], [data-condition="fog"], [data-condition^="windy"], [data-condition="clear-night"]) {
+        color: #c9d4de;
+      }
+
+      .brand-rain-card {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        border: 1px solid rgb(124 196 242 / 45%);
+        border-left: 3px solid #7cc4f2;
+        border-radius: 8px;
+        background: rgb(22 142 216 / 18%);
+        color: #d8eefc;
+        font-size: 12px;
+        font-weight: 750;
+        white-space: nowrap;
+      }
+
+      .brand-rain-card svg {
+        width: 15px;
+        height: 15px;
+        color: #7cc4f2;
+        flex: 0 0 auto;
+      }
+
+      .brand-weather-flags {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 5px;
+      }
+
+      .brand-weather-flags:not(:has(> :not([hidden]))) {
+        display: none;
+      }
+
+      .brand-aqi,
+      .brand-heat-advisory {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1.4;
+        white-space: nowrap;
+      }
+
+      .brand-aqi {
+        border: 1px solid var(--aqi-color, #00e400);
+        color: var(--aqi-color, #00e400);
+        background: rgb(4 13 23 / 35%);
+      }
+
+      .brand-heat-advisory {
+        background: #e8590c;
+        color: #fff;
+      }
+
+      .brand-heat-advisory svg {
+        width: 11px;
+        height: 11px;
+      }
+
+      .brand-weather [hidden] {
+        display: none;
       }
 
       .menu {
@@ -3840,9 +3941,19 @@
           <img src="future-homes-tech-logo.png" alt="">
           <div class="brand-text">
             <div class="brand-name">Future Homes <span class="brand-accent">Tech</span></div>
-        <div class="brand-version">V 0.8.43</div>
+        <div class="brand-version">V 0.8.44</div>
         <div class="brand-beta" id="brand-beta" hidden>BETA</div>
-            <div class="brand-temperature" id="brand-temperature">—</div>
+            <div class="brand-weather" id="brand-weather">
+              <div class="brand-weather-now">
+                <span class="brand-forecast-icon" id="brand-forecast-icon" role="img" hidden></span>
+                <div class="brand-temperature" id="brand-temperature">—</div>
+              </div>
+              <div class="brand-rain-card" id="brand-rain-card" role="status" hidden></div>
+              <div class="brand-weather-flags">
+                <span class="brand-aqi" id="brand-aqi" hidden></span>
+                <span class="brand-heat-advisory" id="brand-heat-advisory" hidden></span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -4282,6 +4393,10 @@
       const homekitSecurityList = document.querySelector("#homekit-security-list");
       const homekitCount = document.querySelector("#homekit-count");
       const brandTemperature = document.querySelector("#brand-temperature");
+      const brandForecastIcon = document.querySelector("#brand-forecast-icon");
+      const brandRainCard = document.querySelector("#brand-rain-card");
+      const brandAqi = document.querySelector("#brand-aqi");
+      const brandHeatAdvisory = document.querySelector("#brand-heat-advisory");
       const roomState = document.querySelector("#room-state");
       const homeHouseMode = document.querySelector("#home-house-mode");
       const homeArmedStatus = document.querySelector("#home-armed-status");
@@ -4328,7 +4443,7 @@
       const SECURITY_LIVE_REFRESH_INTERVAL_MS = LIVE_STATE_FALLBACK_INTERVAL_MS;
       const TEMPERATURE_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
       const OFFLINE_COUNT_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-      const CLIENT_VERSION = "0.8.43";
+      const CLIENT_VERSION = "0.8.44";
       let appColor = "blue";
       function applyAppColor(value) {
         appColor = ["blue", "red", "green"].includes(value) ? value : "blue";
@@ -4817,9 +4932,65 @@
           brandTemperature.textContent = Number.isFinite(temperature)
             ? `${Math.round(temperature)}°`
             : "—";
+          renderBrandWeather(payload);
         } catch (_error) {
           brandTemperature.textContent = "—";
+          renderBrandWeather({});
         }
+      }
+
+      const WEATHER_ICON_PATHS = {
+        sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+        moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+        partly: '<path d="M8 3v1.5M3.5 7.5H5M4.8 4.3l1 1M12 5.6a4 4 0 0 0-6.4 3.6"/><path d="M8 20h9a4 4 0 0 0 .6-8 5.5 5.5 0 0 0-10.5 1.6A3.2 3.2 0 0 0 8 20z"/>',
+        cloud: '<path d="M7 19h10a4.5 4.5 0 0 0 .7-9A6 6 0 0 0 6.2 11.6 3.7 3.7 0 0 0 7 19z"/>',
+        rain: '<path d="M7 15h10a4 4 0 0 0 .6-8A5.5 5.5 0 0 0 7.1 8.6 3.2 3.2 0 0 0 7 15z"/><path d="M8.5 18l-1 2.5M12.5 18l-1 2.5M16.5 18l-1 2.5"/>',
+        pour: '<path d="M7 13h10a4 4 0 0 0 .6-8A5.5 5.5 0 0 0 7.1 6.6 3.2 3.2 0 0 0 7 13z"/><path d="M8 16l-1.5 4.5M12 16l-1.5 4.5M16 16l-1.5 4.5"/>',
+        storm: '<path d="M7 14h10a4 4 0 0 0 .6-8A5.5 5.5 0 0 0 7.1 7.6 3.2 3.2 0 0 0 7 14z"/><path d="M12.5 15l-2.5 4h3l-2 3.5"/>',
+        snow: '<path d="M7 14h10a4 4 0 0 0 .6-8A5.5 5.5 0 0 0 7.1 7.6 3.2 3.2 0 0 0 7 14z"/><path d="M8.5 18h.01M12 20h.01M15.5 18h.01M10 21.5h.01M14 21.5h.01"/>',
+        fog: '<path d="M4 9h16M3 13h18M5 17h14"/>',
+        wind: '<path d="M3 9h11a3 3 0 1 0-3-3M3 14h15a3 3 0 1 1-3 3M3 19h7"/>',
+        drop: '<path d="M12 3.5s6 6.4 6 10.5a6 6 0 0 1-12 0c0-4.1 6-10.5 6-10.5z"/>',
+        alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>',
+      };
+      const WEATHER_CONDITIONS = {
+        "sunny": ["sun", "Sunny"], "clear-night": ["moon", "Clear"],
+        "partlycloudy": ["partly", "Partly cloudy"], "cloudy": ["cloud", "Cloudy"],
+        "rainy": ["rain", "Rain"], "pouring": ["pour", "Heavy rain"],
+        "lightning": ["storm", "Thunderstorms"], "lightning-rainy": ["storm", "Thunderstorms"],
+        "snowy": ["snow", "Snow"], "snowy-rainy": ["snow", "Sleet"], "hail": ["snow", "Hail"],
+        "fog": ["fog", "Fog"], "windy": ["wind", "Windy"], "windy-variant": ["wind", "Windy"],
+        "exceptional": ["alert", "Severe weather"],
+      };
+      const RAIN_CARD_LABELS = {rainy: "Raining", pouring: "Heavy rain", "lightning-rainy": "Thunderstorms"};
+      const AQI_LEVELS = [[50, "#00e400", "Good"], [100, "#ffde33", "Moderate"], [150, "#ff9933", "Unhealthy for sensitive groups"], [200, "#ff4d4d", "Unhealthy"], [300, "#b366ff", "Very unhealthy"], [Infinity, "#c0395a", "Hazardous"]];
+
+      function weatherIcon(name) {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${WEATHER_ICON_PATHS[name] || ""}</svg>`;
+      }
+
+      function renderBrandWeather(payload) {
+        const forecast = WEATHER_CONDITIONS[String(payload?.forecast_condition || payload?.condition || "")];
+        brandForecastIcon.hidden = !forecast;
+        brandForecastIcon.innerHTML = forecast ? weatherIcon(forecast[0]) : "";
+        brandForecastIcon.dataset.condition = String(payload?.forecast_condition || payload?.condition || "");
+        brandForecastIcon.title = forecast ? `Forecast: ${forecast[1]}` : "";
+        brandForecastIcon.setAttribute("aria-label", brandForecastIcon.title);
+        const rainLabel = RAIN_CARD_LABELS[String(payload?.condition || "")];
+        brandRainCard.hidden = !rainLabel;
+        brandRainCard.innerHTML = rainLabel ? `${weatherIcon("drop")}<span>${rainLabel}</span>` : "";
+        const aqi = Number(payload?.aqi?.value);
+        const hasAqi = payload?.aqi && Number.isFinite(aqi);
+        brandAqi.hidden = !hasAqi;
+        if (hasAqi) {
+          const [, color, label] = AQI_LEVELS.find(([limit]) => aqi <= limit);
+          brandAqi.textContent = `AQI ${Math.round(aqi)}`;
+          brandAqi.title = `Air quality: ${label}`;
+          brandAqi.style.setProperty("--aqi-color", color);
+        }
+        const advisory = String(payload?.heat_advisory || "");
+        brandHeatAdvisory.hidden = !advisory;
+        brandHeatAdvisory.innerHTML = advisory ? `${weatherIcon("alert")}<span>${escapeHtml(advisory)}</span>` : "";
       }
 
       async function loadApiPayload(path, force = false, maxAgeMs = 300000) {
